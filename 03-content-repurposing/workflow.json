@@ -1,0 +1,765 @@
+{
+  "name": "AI Content-Repurposing Engine (One Input -> Ten Outputs)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## AI Content-Repurposing Engine\n\n**One input -> ten outputs.** Drop a podcast / webinar recording into a watched Google Drive folder and this workflow:\n1. Downloads + transcribes it (Whisper)\n2. Extracts structured \"content atoms\" (themes, quotes, summary) via an AI Agent\n3. Fans out to 4 channel writers (LinkedIn, X thread, newsletter, short-form video captions)\n4. Runs a brand-safety filter\n5. Routes drafts to Slack for human approval\n6. Publishes approved posts and logs every variant to a Google Sheet\n\nAll credentials are references only -- add your own before running.",
+        "height": 420,
+        "width": 380,
+        "color": 4
+      },
+      "id": "note-overview",
+      "name": "Sticky Note - Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-160, -40]
+    },
+    {
+      "parameters": {
+        "content": "### Parallel fan-out generation\nThe AI Agent output is sent to all four channel writers at once (single main output -> four targets). Each writer has its own channel-specific system prompt + shared brand-voice guidelines, so they run concurrently rather than in a slow chain.",
+        "height": 260,
+        "width": 360,
+        "color": 5
+      },
+      "id": "note-fanout",
+      "name": "Sticky Note - Fan-out",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [1520, -360]
+    },
+    {
+      "parameters": {
+        "content": "### Human-in-the-loop\nNothing auto-publishes blindly. Drafts are sanitized, checked against banned keywords, then posted to Slack. Execution pauses on the Wait node until a reviewer approves via the resume webhook. Only then do the publish nodes fire.",
+        "height": 260,
+        "width": 360,
+        "color": 3
+      },
+      "id": "note-approval",
+      "name": "Sticky Note - Approval",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [2760, -360]
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "triggerOn": "specificFolder",
+        "folderToWatch": {
+          "__rl": true,
+          "value": "REPLACE_WITH_DRIVE_FOLDER_ID",
+          "mode": "id"
+        },
+        "event": "fileCreated",
+        "options": {}
+      },
+      "id": "trigger-drive",
+      "name": "New Recording (Drive)",
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [280, 200],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "options": {
+          "binaryPropertyName": "data"
+        }
+      },
+      "id": "download-media",
+      "name": "Download Media File",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [520, 200],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "audio",
+        "operation": "transcribe",
+        "binaryPropertyName": "data",
+        "options": {}
+      },
+      "id": "transcribe-audio",
+      "name": "Transcribe Audio (Whisper)",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [760, 200],
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Analyze the following transcript and extract reusable content atoms.\n\nSource file: {{ $('New Recording (Drive)').item.json.name }}\n\nTRANSCRIPT:\n{{ $json.text }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "You are a content strategist. Read a long-form transcript (podcast, webinar, or blog) and distill it into structured, reusable content atoms: a one-paragraph summary, the 3-5 core themes, the best verbatim pull-quotes, key statistics or claims, and a suggested title. Be faithful to the source; never invent facts, quotes, or numbers that are not present. Return ONLY the structured object defined by the output parser."
+        }
+      },
+      "id": "agent-extract",
+      "name": "AI Agent - Extract Content Atoms",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [1040, 200]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4o-mini",
+          "cachedResultName": "gpt-4o-mini"
+        },
+        "options": {
+          "temperature": 0.3
+        }
+      },
+      "id": "chat-model",
+      "name": "OpenAI Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [980, 440],
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"title\": { \"type\": \"string\" },\n    \"summary\": { \"type\": \"string\" },\n    \"themes\": { \"type\": \"array\", \"items\": { \"type\": \"string\" } },\n    \"quotes\": { \"type\": \"array\", \"items\": { \"type\": \"string\" } },\n    \"stats\": { \"type\": \"array\", \"items\": { \"type\": \"string\" } },\n    \"cta\": { \"type\": \"string\" }\n  },\n  \"required\": [\"title\", \"summary\", \"themes\", \"quotes\"]\n}"
+      },
+      "id": "output-parser",
+      "name": "Content Atom Schema",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [1200, 440]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4o-mini",
+          "cachedResultName": "gpt-4o-mini"
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You write LinkedIn posts for a B2B brand. Brand voice: plain-spoken, credible, no hype, no emoji spam, one idea per post. Structure: a scroll-stopping first line, 3-5 short punchy lines of insight drawn ONLY from the provided content atoms, then a single soft CTA. 150-250 words. Do not fabricate facts or quotes beyond what is supplied."
+            },
+            {
+              "role": "user",
+              "content": "=Content atoms (JSON):\n{{ JSON.stringify($json.output) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "gen-linkedin",
+      "name": "Generate LinkedIn Post",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [1440, -160],
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4o-mini",
+          "cachedResultName": "gpt-4o-mini"
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You write X/Twitter threads. Produce 5-8 tweets. Tweet 1 is the hook. Each tweet under 280 characters, numbered like 1/, 2/, .... Brand voice: sharp, useful, no hashtag stuffing, at most one emoji per thread. Base every tweet on the supplied content atoms only. Return the thread as a numbered list, one tweet per line."
+            },
+            {
+              "role": "user",
+              "content": "=Content atoms (JSON):\n{{ JSON.stringify($json.output) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "gen-x",
+      "name": "Generate X Thread",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [1440, 40],
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4o-mini",
+          "cachedResultName": "gpt-4o-mini"
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You write a newsletter section. Produce a headline plus 120-180 words of editorial prose summarizing the key insight for a subscriber audience, ending with a one-line 'why it matters'. Brand voice: warm, expert, concrete. Use only the supplied content atoms; do not invent details."
+            },
+            {
+              "role": "user",
+              "content": "=Content atoms (JSON):\n{{ JSON.stringify($json.output) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "gen-newsletter",
+      "name": "Generate Newsletter Section",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [1440, 240],
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4o-mini",
+          "cachedResultName": "gpt-4o-mini"
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You write short-form video scripts for Reels / Shorts / TikTok. Produce 3 distinct options. Each option has: a 1-line HOOK (first 2 seconds), a 15-25 second spoken caption/script, and 3 on-screen text overlays. Punchy, spoken-word cadence. Base everything on the supplied content atoms only."
+            },
+            {
+              "role": "user",
+              "content": "=Content atoms (JSON):\n{{ JSON.stringify($json.output) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "gen-video",
+      "name": "Generate Video Captions",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [1440, 440],
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "numberInputs": 4
+      },
+      "id": "merge-drafts",
+      "name": "Merge Channel Drafts",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [1780, 140]
+    },
+    {
+      "parameters": {
+        "jsShortcuts": false,
+        "language": "javaScript",
+        "jsCode": "// Collect the four channel drafts, tag each by channel, and run a\n// simple banned-keyword brand-safety check across all variants.\nconst banned = [\n  'guaranteed', 'get rich', 'miracle', 'risk-free', 'no risk',\n  'act now', 'limited time only', 'crypto pump', 'financial advice'\n];\n\nconst channels = ['linkedin', 'x_thread', 'newsletter', 'video_captions'];\nconst items = $input.all();\n\nconst variants = items.map((it, i) => {\n  const j = it.json || {};\n  // The OpenAI node returns the text under different keys depending on version;\n  // grab the most likely one.\n  const text = j.message?.content ?? j.content ?? j.text ?? j.output ?? JSON.stringify(j);\n  return { channel: channels[i] || `channel_${i}`, text };\n});\n\nconst blob = variants.map(v => v.text).join('\\n').toLowerCase();\nconst flagged = banned.filter(b => blob.includes(b));\n\nreturn [{\n  json: {\n    source_file: $('New Recording (Drive)').first().json.name || 'unknown',\n    title: $('AI Agent - Extract Content Atoms').first().json.output?.title || '',\n    variants,\n    brand_safe: flagged.length === 0,\n    flagged_terms: flagged,\n    created_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "brand-safety",
+      "name": "Brand-Safety Sanitizer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2020, 140]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond-brandsafe",
+              "leftValue": "={{ $json.brand_safe }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-brandsafe",
+      "name": "Brand-Safe?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [2260, 140]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_SLACK_CHANNEL_ID",
+          "mode": "id"
+        },
+        "text": "=*New content pack ready for review* :memo:\n*Source:* {{ $json.source_file }}\n*Title:* {{ $json.title }}\n\nApprove to publish LinkedIn + X, or reject to hold.\n_Resume URL:_ {{ $execution.resumeUrl }}",
+        "otherOptions": {}
+      },
+      "id": "slack-approval",
+      "name": "Request Slack Approval",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [2500, 40],
+      "webhookId": "slack-approval-webhook",
+      "credentials": {
+        "slackOAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resume": "webhook",
+        "options": {}
+      },
+      "id": "wait-approval",
+      "name": "Wait for Approval",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [2720, 40],
+      "webhookId": "approval-resume-webhook"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond-approved",
+              "leftValue": "={{ $json.body?.decision || $json.decision || 'approved' }}",
+              "rightValue": "approved",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-approved",
+      "name": "Approved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [2940, 40]
+    },
+    {
+      "parameters": {
+        "postAs": "person",
+        "text": "={{ $('Brand-Safety Sanitizer').item.json.variants[0].text }}",
+        "additionalFields": {}
+      },
+      "id": "publish-linkedin",
+      "name": "Publish LinkedIn Post",
+      "type": "n8n-nodes-base.linkedIn",
+      "typeVersion": 1,
+      "position": [3200, -140],
+      "credentials": {
+        "linkedInOAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "LinkedIn account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "text": "={{ $('Brand-Safety Sanitizer').item.json.variants[1].text }}",
+        "additionalFields": {}
+      },
+      "id": "publish-x",
+      "name": "Publish X Thread",
+      "type": "n8n-nodes-base.twitter",
+      "typeVersion": 2,
+      "position": [3200, 40],
+      "credentials": {
+        "twitterOAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "X / Twitter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Content Ledger"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "source_file": "={{ $('Brand-Safety Sanitizer').item.json.source_file }}",
+            "title": "={{ $('Brand-Safety Sanitizer').item.json.title }}",
+            "linkedin": "={{ $('Brand-Safety Sanitizer').item.json.variants[0].text }}",
+            "x_thread": "={{ $('Brand-Safety Sanitizer').item.json.variants[1].text }}",
+            "newsletter": "={{ $('Brand-Safety Sanitizer').item.json.variants[2].text }}",
+            "video_captions": "={{ $('Brand-Safety Sanitizer').item.json.variants[3].text }}",
+            "status": "published",
+            "created_at": "={{ $('Brand-Safety Sanitizer').item.json.created_at }}"
+          },
+          "matchingColumns": []
+        },
+        "options": {}
+      },
+      "id": "log-published",
+      "name": "Log to Content Ledger",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [3200, 240],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Content Ledger"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "source_file": "={{ $json.source_file }}",
+            "title": "={{ $json.title }}",
+            "status": "={{ $json.brand_safe === false ? 'held_brand_safety' : 'rejected_by_reviewer' }}",
+            "flagged_terms": "={{ ($json.flagged_terms || []).join(', ') }}",
+            "created_at": "={{ $json.created_at }}"
+          },
+          "matchingColumns": []
+        },
+        "options": {}
+      },
+      "id": "log-held",
+      "name": "Log Rejected / Held",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [2720, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "New Recording (Drive)": {
+      "main": [
+        [
+          {
+            "node": "Download Media File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Media File": {
+      "main": [
+        [
+          {
+            "node": "Transcribe Audio (Whisper)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribe Audio (Whisper)": {
+      "main": [
+        [
+          {
+            "node": "AI Agent - Extract Content Atoms",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent - Extract Content Atoms",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Content Atom Schema": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI Agent - Extract Content Atoms",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent - Extract Content Atoms": {
+      "main": [
+        [
+          {
+            "node": "Generate LinkedIn Post",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Generate X Thread",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Generate Newsletter Section",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Generate Video Captions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate LinkedIn Post": {
+      "main": [
+        [
+          {
+            "node": "Merge Channel Drafts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate X Thread": {
+      "main": [
+        [
+          {
+            "node": "Merge Channel Drafts",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Generate Newsletter Section": {
+      "main": [
+        [
+          {
+            "node": "Merge Channel Drafts",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Generate Video Captions": {
+      "main": [
+        [
+          {
+            "node": "Merge Channel Drafts",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Merge Channel Drafts": {
+      "main": [
+        [
+          {
+            "node": "Brand-Safety Sanitizer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Brand-Safety Sanitizer": {
+      "main": [
+        [
+          {
+            "node": "Brand-Safe?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Brand-Safe?": {
+      "main": [
+        [
+          {
+            "node": "Request Slack Approval",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Rejected / Held",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Request Slack Approval": {
+      "main": [
+        [
+          {
+            "node": "Wait for Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Approval": {
+      "main": [
+        [
+          {
+            "node": "Approved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approved?": {
+      "main": [
+        [
+          {
+            "node": "Publish LinkedIn Post",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Publish X Thread",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log to Content Ledger",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Rejected / Held",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateId": "self-built-content-repurposing-engine",
+    "instanceId": "portfolio-demo"
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true
+  },
+  "tags": []
+}

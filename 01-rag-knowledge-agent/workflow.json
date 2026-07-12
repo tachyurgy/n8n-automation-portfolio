@@ -1,0 +1,946 @@
+{
+  "name": "Company Knowledge-Base RAG Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "32f5fe52-6227-4a19-a733-43d6d5544848",
+      "name": "Telegram Trigger \u2014 User Question",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1120,
+        260
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_TELEGRAM_CRED",
+          "name": "Telegram Bot API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {},
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "03e9d7f6-0cce-4332-8617-a78e6c09f701",
+              "operator": {
+                "type": "string",
+                "operation": "empty",
+                "singleValue": true
+              },
+              "leftValue": "={{ $json.message.text }}",
+              "rightValue": ""
+            }
+          ]
+        }
+      },
+      "id": "bd823aca-3b9d-4f0a-8f46-064f591eb66b",
+      "name": "Voice or Text?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -900,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "fileId": "={{ $('Telegram Trigger \u2014 User Question').item.json.message.voice.file_id }}"
+      },
+      "id": "6c651382-4afa-4369-8a6b-1046c30a036d",
+      "name": "Get Voice File",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        -680,
+        140
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_TELEGRAM_CRED",
+          "name": "Telegram Bot API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "audio",
+        "operation": "transcribe",
+        "options": {}
+      },
+      "id": "f57d26cb-6530-4856-81d0-e1c7d9108c06",
+      "name": "Whisper Transcribe",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.3,
+      "position": [
+        -460,
+        140
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_OPENAI_CRED",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.text || $('Telegram Trigger \u2014 User Question').first().json.message.text }}",
+        "options": {
+          "systemMessage": "You are the Company Knowledge-Base Assistant. You answer employee questions STRICTLY from the internal company documents returned by the `company_knowledge_base` tool.\n\nRules:\n1. ALWAYS call the `company_knowledge_base` tool first to retrieve relevant context before answering.\n2. Answer ONLY from the retrieved context. Never use outside/general knowledge.\n3. Cite every claim with the source filename in the form `(source: <file_name>)`. If several files support the answer, cite each.\n4. If the retrieved context does not contain the answer, reply exactly: \"I couldn't find that in the company documents.\" Do not guess.\n5. Be concise and use Markdown. Today's date is {{ $now.format('yyyy-LL-dd') }}."
+        }
+      },
+      "id": "a29eb86e-d5e7-4195-9d9e-a0b69143ab0a",
+      "name": "Company KB Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        -180,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "model": "claude-3-5-sonnet-20241022",
+        "options": {
+          "temperature": 0
+        }
+      },
+      "id": "a33719de-1f1e-42d2-a9a1-f5ef788401fc",
+      "name": "Anthropic Chat Model (Claude)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.2,
+      "position": [
+        -320,
+        500
+      ],
+      "credentials": {
+        "anthropicApi": {
+          "id": "REPLACE_ANTHROPIC_CRED",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Telegram Trigger \u2014 User Question').first().json.message.from.id }}",
+        "contextWindowLength": 12
+      },
+      "id": "998bcd27-ff8c-4307-b182-8e290fa68866",
+      "name": "Window Buffer Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.2,
+      "position": [
+        -160,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "name": "company_knowledge_base",
+        "description": "Retrieve passages from the company's internal documentation (handbooks, policies, runbooks, specs). Input a natural-language question; returns the most relevant document chunks with their source file_name metadata.",
+        "topK": 6
+      },
+      "id": "5e3420db-68a3-4534-bb7e-7b20815ba8b5",
+      "name": "Company Docs Knowledge Base",
+      "type": "@n8n/n8n-nodes-langchain.toolVectorStore",
+      "typeVersion": 1,
+      "position": [
+        40,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "tableName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "documents",
+          "cachedResultName": "documents"
+        },
+        "options": {
+          "queryName": "match_documents"
+        }
+      },
+      "id": "4afbe0c1-8a36-4731-9f85-18f7ef71e427",
+      "name": "Retrieve Company Docs",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
+      "typeVersion": 1,
+      "position": [
+        40,
+        720
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "REPLACE_SUPABASE_CRED",
+          "name": "Supabase Vector Store"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "text-embedding-3-small",
+        "options": {}
+      },
+      "id": "2588fa24-ec55-4f23-82a8-380a418de1bc",
+      "name": "Query Embeddings (3-small)",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1,
+      "position": [
+        -180,
+        900
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_OPENAI_CRED",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "options": {}
+      },
+      "id": "78443e9c-713f-4b16-af96-a21ffc8dfc49",
+      "name": "Tool Answer Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [
+        240,
+        720
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_OPENAI_CRED",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "text": "={{ $json.output }}",
+        "chatId": "={{ $('Telegram Trigger \u2014 User Question').first().json.message.from.id }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "e804761a-6009-43bc-83af-28a898f630c1",
+      "name": "Send Answer",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        200,
+        260
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_TELEGRAM_CRED",
+          "name": "Telegram Bot API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "event": "fileCreated",
+        "triggerOn": "specificFolder",
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "folderToWatch": {
+          "__rl": true,
+          "mode": "list",
+          "value": "REPLACE_FOLDER_ID",
+          "cachedResultName": "Company Docs"
+        },
+        "options": {}
+      },
+      "id": "6c5973dc-e1d7-47ed-8f1c-f07bc4e0c242",
+      "name": "Drive: New Doc Created",
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1120,
+        1180
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_GDRIVE_CRED",
+          "name": "Google Drive OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.id }}"
+        },
+        "options": {}
+      },
+      "id": "dd761748-53f3-43ea-848b-a57ad941df6e",
+      "name": "Download New File",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -880,
+        1180
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_GDRIVE_CRED",
+          "name": "Google Drive OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "options": {}
+      },
+      "id": "ba773c60-f62a-4411-9a3e-92d1e91c2a50",
+      "name": "Extract Text",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        -640,
+        1180
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "insert",
+        "tableName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "documents",
+          "cachedResultName": "documents"
+        },
+        "options": {}
+      },
+      "id": "35e48dc3-6c79-490e-a7ef-a7c83d3344a8",
+      "name": "Insert Into Knowledge Base",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
+      "typeVersion": 1,
+      "position": [
+        -360,
+        1180
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "REPLACE_SUPABASE_CRED",
+          "name": "Supabase Vector Store"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "dataType": "json",
+        "jsonMode": "expressionData",
+        "jsonData": "={{ $('Extract Text').item.json.text }}",
+        "options": {
+          "metadata": {
+            "metadataValues": [
+              {
+                "name": "file_name",
+                "value": "={{ $('Download New File').item.json.name }}"
+              },
+              {
+                "name": "drive_id",
+                "value": "={{ $('Download New File').item.json.id }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "09e6d0c6-a97e-44d7-b4fc-ee1b46a5bd61",
+      "name": "Chunk + Metadata Loader",
+      "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+      "typeVersion": 1,
+      "position": [
+        -480,
+        1400
+      ]
+    },
+    {
+      "parameters": {
+        "chunkSize": 1000,
+        "chunkOverlap": 150,
+        "options": {}
+      },
+      "id": "21cbc761-2382-42a7-a525-fe6dfa7fb3bb",
+      "name": "Recursive Text Splitter",
+      "type": "@n8n/n8n-nodes-langchain.textSplitterRecursiveCharacterTextSplitter",
+      "typeVersion": 1,
+      "position": [
+        -660,
+        1600
+      ]
+    },
+    {
+      "parameters": {
+        "model": "text-embedding-3-small",
+        "options": {}
+      },
+      "id": "3bbf3971-9c46-408c-952f-fc21542ae422",
+      "name": "Insert Embeddings (3-small)",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1,
+      "position": [
+        -260,
+        1400
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_OPENAI_CRED",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "event": "fileUpdated",
+        "triggerOn": "specificFolder",
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "folderToWatch": {
+          "__rl": true,
+          "mode": "list",
+          "value": "REPLACE_FOLDER_ID",
+          "cachedResultName": "Company Docs"
+        },
+        "options": {}
+      },
+      "id": "763efd2d-a054-48a2-9411-72f83b2c01e2",
+      "name": "Drive: Doc Updated",
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1120,
+        2020
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_GDRIVE_CRED",
+          "name": "Google Drive OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "tableId": "documents",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "metadata->>drive_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        }
+      },
+      "id": "da94469c-04de-4a20-a065-f8a07c7bd12a",
+      "name": "Delete Old Chunks (by drive_id)",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -880,
+        2020
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "REPLACE_SUPABASE_CRED",
+          "name": "Supabase Vector Store"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Drive: Doc Updated').item.json.id }}"
+        },
+        "options": {}
+      },
+      "id": "84b2b2d7-ad62-4754-9eb6-9a31ce99caca",
+      "name": "Download Updated File",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -640,
+        2020
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_GDRIVE_CRED",
+          "name": "Google Drive OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "options": {}
+      },
+      "id": "c798ee47-f811-4f12-88a4-150c4fe17bb1",
+      "name": "Extract Updated Text",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        -400,
+        2020
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "insert",
+        "tableName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "documents",
+          "cachedResultName": "documents"
+        },
+        "options": {}
+      },
+      "id": "be49d60b-b177-4401-bb89-e95fe5463cc7",
+      "name": "Re-Insert Updated Chunks",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
+      "typeVersion": 1,
+      "position": [
+        -140,
+        2020
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "REPLACE_SUPABASE_CRED",
+          "name": "Supabase Vector Store"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "dataType": "json",
+        "jsonMode": "expressionData",
+        "jsonData": "={{ $('Extract Updated Text').item.json.text }}",
+        "options": {
+          "metadata": {
+            "metadataValues": [
+              {
+                "name": "file_name",
+                "value": "={{ $('Download Updated File').item.json.name }}"
+              },
+              {
+                "name": "drive_id",
+                "value": "={{ $('Download Updated File').item.json.id }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "eeb3efe7-f43f-44f8-8982-2098875f196d",
+      "name": "Re-Chunk + Metadata Loader",
+      "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+      "typeVersion": 1,
+      "position": [
+        -260,
+        2240
+      ]
+    },
+    {
+      "parameters": {
+        "chunkSize": 1000,
+        "chunkOverlap": 150,
+        "options": {}
+      },
+      "id": "987a2219-050a-4819-97ae-952f941f627c",
+      "name": "Re-Index Text Splitter",
+      "type": "@n8n/n8n-nodes-langchain.textSplitterRecursiveCharacterTextSplitter",
+      "typeVersion": 1,
+      "position": [
+        -440,
+        2440
+      ]
+    },
+    {
+      "parameters": {
+        "model": "text-embedding-3-small",
+        "options": {}
+      },
+      "id": "700e0fa6-2586-42a5-aafb-6e17b5419a40",
+      "name": "Re-Index Embeddings (3-small)",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        2240
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_OPENAI_CRED",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 1 \u00b7 Query Agent  (ask your docs)\nTelegram (text **or** voice) \u2192 transcribe voice with Whisper \u2192 **AI Agent** (Claude) calls the `company_knowledge_base` tool (Supabase/pgvector, topK 6) \u2192 cited answer back to Telegram.\n\nGrounding is enforced in the system prompt: answer only from retrieved context, cite `file_name`, or say it isn't in the docs.",
+        "height": 300,
+        "width": 1160,
+        "color": 4
+      },
+      "id": "f9a035c2-208a-4e7d-a348-d7f115c9d95b",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1160,
+        -60
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2 \u00b7 Ingest  (index new docs)\nGoogle Drive *file created* \u2192 download \u2192 extract text \u2192 recursive split (1000/150) \u2192 embed (text-embedding-3-small) \u2192 **insert** into Supabase with `file_name` + `drive_id` metadata (metadata powers citations + idempotent re-index).",
+        "height": 260,
+        "width": 980,
+        "color": 5
+      },
+      "id": "90cbe338-12da-49a8-9b4d-d30ec2a12b22",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1160,
+        1080
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 3 \u00b7 Idempotent Re-index  (docs change)\nGoogle Drive *file updated* \u2192 **DELETE every chunk WHERE metadata->>drive_id = fileId** \u2192 re-extract \u2192 re-embed \u2192 re-insert. Delete-then-insert keyed on `drive_id` prevents duplicate/stale chunks \u2014 the senior detail that keeps answers correct over time.",
+        "height": 280,
+        "width": 1160,
+        "color": 3
+      },
+      "id": "fc872000-d458-461c-937b-29b978f77cc5",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1160,
+        1900
+      ]
+    }
+  ],
+  "connections": {
+    "Telegram Trigger \u2014 User Question": {
+      "main": [
+        [
+          {
+            "node": "Voice or Text?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Voice or Text?": {
+      "main": [
+        [
+          {
+            "node": "Get Voice File",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Company KB Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Voice File": {
+      "main": [
+        [
+          {
+            "node": "Whisper Transcribe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Whisper Transcribe": {
+      "main": [
+        [
+          {
+            "node": "Company KB Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Company KB Agent": {
+      "main": [
+        [
+          {
+            "node": "Send Answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anthropic Chat Model (Claude)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Company KB Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Window Buffer Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "Company KB Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Company Docs Knowledge Base": {
+      "ai_tool": [
+        [
+          {
+            "node": "Company KB Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retrieve Company Docs": {
+      "ai_vectorStore": [
+        [
+          {
+            "node": "Company Docs Knowledge Base",
+            "type": "ai_vectorStore",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Embeddings (3-small)": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Retrieve Company Docs",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tool Answer Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Company Docs Knowledge Base",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive: New Doc Created": {
+      "main": [
+        [
+          {
+            "node": "Download New File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download New File": {
+      "main": [
+        [
+          {
+            "node": "Extract Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Text": {
+      "main": [
+        [
+          {
+            "node": "Insert Into Knowledge Base",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chunk + Metadata Loader": {
+      "ai_document": [
+        [
+          {
+            "node": "Insert Into Knowledge Base",
+            "type": "ai_document",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Embeddings (3-small)": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Insert Into Knowledge Base",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recursive Text Splitter": {
+      "ai_textSplitter": [
+        [
+          {
+            "node": "Chunk + Metadata Loader",
+            "type": "ai_textSplitter",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive: Doc Updated": {
+      "main": [
+        [
+          {
+            "node": "Delete Old Chunks (by drive_id)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete Old Chunks (by drive_id)": {
+      "main": [
+        [
+          {
+            "node": "Download Updated File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Updated File": {
+      "main": [
+        [
+          {
+            "node": "Extract Updated Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Updated Text": {
+      "main": [
+        [
+          {
+            "node": "Re-Insert Updated Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Re-Chunk + Metadata Loader": {
+      "ai_document": [
+        [
+          {
+            "node": "Re-Insert Updated Chunks",
+            "type": "ai_document",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Re-Index Embeddings (3-small)": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Re-Insert Updated Chunks",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Re-Index Text Splitter": {
+      "ai_textSplitter": [
+        [
+          {
+            "node": "Re-Chunk + Metadata Loader",
+            "type": "ai_textSplitter",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "portfolio-demo"
+  }
+}

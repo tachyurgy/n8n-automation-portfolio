@@ -1,0 +1,924 @@
+{
+  "name": "Inbound Lead Enrichment, ICP Scoring & CRM Upsert",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "inbound-lead",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "112ae8c8-244e-4667-b339-4621232968bc",
+      "name": "Inbound Lead Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1360,
+        320
+      ],
+      "webhookId": "18ed70b5-7019-49b4-88f9-5c9c45f4df2c"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "189475db-dfa0-434c-b08c-45b81d1ba7fd",
+              "name": "email",
+              "type": "string",
+              "value": "={{ ($json.body.email || '').toLowerCase().trim() }}"
+            },
+            {
+              "id": "320928c6-cf55-4e2a-8cdb-f9ae2757f3ec",
+              "name": "domain",
+              "type": "string",
+              "value": "={{ ($json.body.email || '').split('@')[1] || '' }}"
+            },
+            {
+              "id": "010ab5b3-bbbf-41e9-a70a-0b4198e238d9",
+              "name": "fullName",
+              "type": "string",
+              "value": "={{ ($json.body.name || ($json.body.first_name + ' ' + $json.body.last_name) || '').trim() }}"
+            },
+            {
+              "id": "231b7105-2a7e-4db8-9bb5-78d5d56558eb",
+              "name": "company",
+              "type": "string",
+              "value": "={{ ($json.body.company || '').trim() }}"
+            },
+            {
+              "id": "4afdf974-ed2c-48c3-be17-441ce053978b",
+              "name": "source",
+              "type": "string",
+              "value": "={{ $json.body.source || 'webform' }}"
+            },
+            {
+              "id": "654e2f87-5e33-4fcd-bdcd-0a0d6a6f7a67",
+              "name": "receivedAt",
+              "type": "string",
+              "value": "={{ $now.toISO() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "af51f309-2a67-400f-9751-7a46fe3f1d2c",
+      "name": "Normalize Lead Fields",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1140,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.hubapi.com/crm/v3/objects/contacts/search",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "hubspotAppToken",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ filterGroups: [{ filters: [{ propertyName: 'email', operator: 'EQ', value: $json.email }] }], properties: ['email','hs_object_id'], limit: 1 }) }}",
+        "options": {}
+      },
+      "id": "2e7d5802-2883-4d15-bdd0-25387599675a",
+      "name": "CRM Dedup Search (by email)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -920,
+        320
+      ],
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "HUBSPOT_CRED_ID",
+          "name": "HubSpot account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "4a37f1a0-4730-4689-aac2-a3d2a889f997",
+              "leftValue": "={{ $json.total }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "00670cba-afc4-46bc-9562-ad703a93e7b6",
+      "name": "Lead Already in CRM?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -700,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "58176403-65df-4435-baf6-e2cd1183986d",
+              "name": "crmMode",
+              "type": "string",
+              "value": "update"
+            },
+            {
+              "id": "dd71ec1f-1948-42fb-9668-35dac951524d",
+              "name": "crmContactId",
+              "type": "string",
+              "value": "={{ $json.results[0].id }}"
+            },
+            {
+              "id": "a3735548-7fe1-4af5-a074-6414a72814ba",
+              "name": "email",
+              "type": "string",
+              "value": "={{ $('Normalize Lead Fields').item.json.email }}"
+            },
+            {
+              "id": "d49231ee-bd35-41b4-bf1d-5ab597133854",
+              "name": "domain",
+              "type": "string",
+              "value": "={{ $('Normalize Lead Fields').item.json.domain }}"
+            },
+            {
+              "id": "3328573b-6b5c-485b-9b86-d9cd59fa0852",
+              "name": "fullName",
+              "type": "string",
+              "value": "={{ $('Normalize Lead Fields').item.json.fullName }}"
+            },
+            {
+              "id": "ce4f652a-e9f2-4448-97e8-1acd3693dcd8",
+              "name": "company",
+              "type": "string",
+              "value": "={{ $('Normalize Lead Fields').item.json.company }}"
+            },
+            {
+              "id": "97fe4e0f-8d8b-4d9f-9fbf-24a95e90c15d",
+              "name": "source",
+              "type": "string",
+              "value": "={{ $('Normalize Lead Fields').item.json.source }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "da4b2847-b372-4ad1-b809-ccd3e36657a4",
+      "name": "Mark: Update Existing",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -480,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "9f9a2ee5-49e3-4a4b-b21c-a9f3c2caaeab",
+              "name": "crmMode",
+              "type": "string",
+              "value": "create"
+            },
+            {
+              "id": "1b7ed87a-7061-4552-98ed-4f2615a945fc",
+              "name": "crmContactId",
+              "type": "string",
+              "value": ""
+            },
+            {
+              "id": "3730ce18-7009-4e60-9f52-2015e739e5a6",
+              "name": "email",
+              "type": "string",
+              "value": "={{ $('Normalize Lead Fields').item.json.email }}"
+            },
+            {
+              "id": "92854349-94ae-411d-af8c-d62b37c2fc2a",
+              "name": "domain",
+              "type": "string",
+              "value": "={{ $('Normalize Lead Fields').item.json.domain }}"
+            },
+            {
+              "id": "3b76c615-28d6-4316-a2a4-2518731efb81",
+              "name": "fullName",
+              "type": "string",
+              "value": "={{ $('Normalize Lead Fields').item.json.fullName }}"
+            },
+            {
+              "id": "e2ae95dc-9ead-4dd3-b19d-a0da1ab7f758",
+              "name": "company",
+              "type": "string",
+              "value": "={{ $('Normalize Lead Fields').item.json.company }}"
+            },
+            {
+              "id": "6a100159-92dc-4b26-808c-b0b6fd8be3e3",
+              "name": "source",
+              "type": "string",
+              "value": "={{ $('Normalize Lead Fields').item.json.source }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "6c077c10-092e-461a-a242-188e84934294",
+      "name": "Mark: New Contact",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -480,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://enrich.internal/v1/company?domain={{ $json.domain }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "domain",
+              "value": "={{ $json.domain }}"
+            },
+            {
+              "name": "email",
+              "value": "={{ $json.email }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "id": "95625c04-e98c-44ad-972d-418a00a9f3e9",
+      "name": "Enrich Company (self-hosted microservice)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -220,
+        320
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "ENRICH_SVC_CRED_ID",
+          "name": "Enrichment service header auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a B2B sales development analyst. Score this inbound lead against our Ideal Customer Profile (ICP).\n\nICP (target): B2B SaaS or e-commerce companies, 50-2000 employees, using Shopify/Rails/modern web stacks, in North America or EU, with a VP/Director/Founder-level contact. Disqualifiers: students, personal gmail-only with no company, competitors, employee count < 10.\n\nLead:\n- Name: {{ $json.fullName }}\n- Email: {{ $json.email }}\n- Company: {{ $json.company }}\n- Domain: {{ $json.domain }}\n- Source: {{ $json.source }}\n\nEnrichment (firmographics):\n- Company name: {{ $('Enrich Company (self-hosted microservice)').item.json.company_name }}\n- Industry: {{ $('Enrich Company (self-hosted microservice)').item.json.industry }}\n- Employees: {{ $('Enrich Company (self-hosted microservice)').item.json.employee_count }}\n- Revenue: {{ $('Enrich Company (self-hosted microservice)').item.json.estimated_revenue }}\n- Tech stack: {{ $('Enrich Company (self-hosted microservice)').item.json.tech_stack }}\n- Country: {{ $('Enrich Company (self-hosted microservice)').item.json.country }}\n- Title: {{ $('Enrich Company (self-hosted microservice)').item.json.person_title }}\n\nReturn ONLY the structured object: a score 0-100, a tier (hot >=75, warm 40-74, cold <40), and one or two sentences of reasoning.",
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "id": "04e1bef6-612c-4f5d-b1ff-7728771cb709",
+      "name": "Score Lead Against ICP",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        60,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list"
+        },
+        "options": {
+          "temperature": 0.1
+        }
+      },
+      "id": "9efb699f-b254-4139-9363-1929b3278521",
+      "name": "OpenAI Chat Model (GPT)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        540
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "OPENAI_CRED_ID",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"score\": {\n      \"type\": \"integer\",\n      \"description\": \"ICP fit 0-100\"\n    },\n    \"tier\": {\n      \"type\": \"string\",\n      \"enum\": [\n        \"hot\",\n        \"warm\",\n        \"cold\"\n      ]\n    },\n    \"reasoning\": {\n      \"type\": \"string\",\n      \"description\": \"1-2 sentence justification\"\n    }\n  },\n  \"required\": [\n    \"score\",\n    \"tier\",\n    \"reasoning\"\n  ]\n}"
+      },
+      "id": "4c819265-f97f-4cfb-b293-7e6a59ae0ce9",
+      "name": "ICP Score Parser (structured JSON)",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [
+        180,
+        540
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "appToken",
+        "resource": "contact",
+        "operation": "upsert",
+        "email": "={{ $('Score Lead Against ICP').item.json.email || $('Normalize Lead Fields').item.json.email }}",
+        "additionalFields": {
+          "companyName": "={{ $('Enrich Company (self-hosted microservice)').item.json.company_name }}",
+          "leadStatus": "={{ $json.output.tier }}",
+          "customPropertiesUi": {
+            "customPropertiesValues": [
+              {
+                "property": "icp_score",
+                "value": "={{ $json.output.score }}"
+              },
+              {
+                "property": "icp_tier",
+                "value": "={{ $json.output.tier }}"
+              },
+              {
+                "property": "icp_reasoning",
+                "value": "={{ $json.output.reasoning }}"
+              },
+              {
+                "property": "lead_source",
+                "value": "={{ $('Normalize Lead Fields').item.json.source }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "840dc9c9-be2b-4c47-8fa8-863945c6c42c",
+      "name": "Upsert Contact to CRM (HubSpot)",
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 2,
+      "position": [
+        400,
+        320
+      ],
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "HUBSPOT_CRED_ID",
+          "name": "HubSpot account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "fe798af5-1834-45b4-a26f-df48c16df0f7",
+                    "leftValue": "={{ $('Score Lead Against ICP').item.json.output.tier }}",
+                    "rightValue": "hot",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "hot"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "2ebc73b2-1163-4c4e-aac0-da98f9401ad2",
+                    "leftValue": "={{ $('Score Lead Against ICP').item.json.output.tier }}",
+                    "rightValue": "warm",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "warm"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "bae3ff36-303e-4601-8ddb-ec20bf1961c1",
+                    "leftValue": "={{ $('Score Lead Against ICP').item.json.output.tier }}",
+                    "rightValue": "cold",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "cold"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "8ab80072-a883-457c-b1cc-6d0902e06f3a",
+      "name": "Route by Tier",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        640,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "C0SALES",
+          "mode": "id"
+        },
+        "text": "=:fire: *HOT lead \u2014 score {{ $('Score Lead Against ICP').item.json.output.score }}/100*\n*{{ $('Normalize Lead Fields').item.json.fullName }}* @ *{{ $('Enrich Company (self-hosted microservice)').item.json.company_name }}*\n:office: {{ $('Enrich Company (self-hosted microservice)').item.json.industry }} \u00b7 {{ $('Enrich Company (self-hosted microservice)').item.json.employee_count }} employees \u00b7 {{ $('Enrich Company (self-hosted microservice)').item.json.country }}\n:email: {{ $('Normalize Lead Fields').item.json.email }}\n:brain: {{ $('Score Lead Against ICP').item.json.output.reasoning }}\n:link: https://app.hubspot.com/contacts/_/contact/{{ $json.id }}",
+        "otherOptions": {}
+      },
+      "id": "b52030bd-58a5-468e-b8fa-02b06f15f74f",
+      "name": "Slack: Hot Lead Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        900,
+        140
+      ],
+      "credentials": {
+        "slackOAuth2Api": {
+          "id": "SLACK_CRED_ID",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "bb56a818-d54f-4789-963d-b088a496ac05",
+      "name": "Warm: Queue for Nurture",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        900,
+        320
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "ba189719-2aaa-4a95-a0fc-94aeddda3b33",
+      "name": "Cold: Archive (no alert)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        900,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, received: true }) }}",
+        "options": {}
+      },
+      "id": "1836bda7-060c-4065-acff-206aac72b4e5",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        640,
+        700
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "ff6310e9-68ba-45bd-af77-c33fc3f2ff50",
+      "name": "On Workflow Error",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1360,
+        860
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "0f300dec-57ce-45bb-b3aa-94d1551b8530",
+              "name": "workflow",
+              "type": "string",
+              "value": "={{ $json.workflow.name }}"
+            },
+            {
+              "id": "b0ce69fb-8d99-485d-9bab-32cf9d55e8fe",
+              "name": "failedNode",
+              "type": "string",
+              "value": "={{ $json.execution.lastNodeExecuted }}"
+            },
+            {
+              "id": "bf65bc0a-cc31-4dff-9891-e551a03d1864",
+              "name": "error",
+              "type": "string",
+              "value": "={{ $json.execution.error.message }}"
+            },
+            {
+              "id": "3b7b16ac-e4de-44c9-a493-88537c03b219",
+              "name": "executionUrl",
+              "type": "string",
+              "value": "={{ $json.execution.url }}"
+            },
+            {
+              "id": "e7d70d2e-4abd-4d7d-9d67-653dfcb191cd",
+              "name": "ts",
+              "type": "string",
+              "value": "={{ $now.toISO() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "449bc23a-7399-4c4f-bb81-d9a01abd4f56",
+      "name": "Format Error Payload",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1120,
+        860
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ops.internal/v1/pipeline-errors",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "c92ba741-3b8d-4b33-bc1c-171290f68ce4",
+      "name": "Log Failure (ops store)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -880,
+        860
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "C0OPS",
+          "mode": "id"
+        },
+        "text": "=:rotating_light: *Lead pipeline failed*\nWorkflow: {{ $json.workflow }}\nNode: {{ $json.failedNode }}\nError: {{ $json.error }}\n{{ $json.executionUrl }}",
+        "otherOptions": {}
+      },
+      "id": "50474d99-eaec-4948-8b90-bb825d3b461c",
+      "name": "Slack: Pipeline Error Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        -640,
+        860
+      ],
+      "credentials": {
+        "slackOAuth2Api": {
+          "id": "SLACK_CRED_ID",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "width": 320,
+        "height": 180,
+        "content": "## Enrichment microservice\nSelf-hosted service at `enrich.internal`.\nFans out to Apollo / Clearbit / Prospeo,\n**caches by domain** (Redis TTL) and **batches**\nto control per-lookup cost. Single stable\ncontract for n8n; providers can be swapped\nwithout touching the workflow. See README."
+      },
+      "id": "c307b179-5161-40ad-80ab-1c2e54a2eb5b",
+      "name": "Sticky: Enrichment microservice",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -260,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "width": 300,
+        "height": 160,
+        "content": "## Idempotent dedup\nSearch CRM by normalized email BEFORE writing.\nExisting -> update path (keeps 1 contact),\nNew -> create path. Re-submits never create\nduplicate contacts."
+      },
+      "id": "ad0e029d-cefc-4512-bc3c-f7522bf736cb",
+      "name": "Sticky: Idempotent dedup",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -960,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "width": 320,
+        "height": 160,
+        "content": "## Error observability\nError Trigger catches ANY node failure,\nlogs a structured payload to the ops store,\nand pings #ops on Slack. Set this workflow\nas the Error Workflow in n8n settings."
+      },
+      "id": "12b380f5-92b6-452e-84e6-8fdcd6a4e9b1",
+      "name": "Sticky: Error observability",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1360,
+        640
+      ]
+    }
+  ],
+  "connections": {
+    "Inbound Lead Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Lead Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Lead Fields": {
+      "main": [
+        [
+          {
+            "node": "CRM Dedup Search (by email)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CRM Dedup Search (by email)": {
+      "main": [
+        [
+          {
+            "node": "Lead Already in CRM?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lead Already in CRM?": {
+      "main": [
+        [
+          {
+            "node": "Mark: Update Existing",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark: New Contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark: Update Existing": {
+      "main": [
+        [
+          {
+            "node": "Enrich Company (self-hosted microservice)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark: New Contact": {
+      "main": [
+        [
+          {
+            "node": "Enrich Company (self-hosted microservice)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enrich Company (self-hosted microservice)": {
+      "main": [
+        [
+          {
+            "node": "Score Lead Against ICP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model (GPT)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Score Lead Against ICP",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ICP Score Parser (structured JSON)": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Score Lead Against ICP",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score Lead Against ICP": {
+      "main": [
+        [
+          {
+            "node": "Upsert Contact to CRM (HubSpot)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Contact to CRM (HubSpot)": {
+      "main": [
+        [
+          {
+            "node": "Route by Tier",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Tier": {
+      "main": [
+        [
+          {
+            "node": "Slack: Hot Lead Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Warm: Queue for Nurture",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Cold: Archive (no alert)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack: Hot Lead Alert": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Warm: Queue for Nurture": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cold: Archive (no alert)": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "On Workflow Error": {
+      "main": [
+        [
+          {
+            "node": "Format Error Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Error Payload": {
+      "main": [
+        [
+          {
+            "node": "Log Failure (ops store)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Failure (ops store)": {
+      "main": [
+        [
+          {
+            "node": "Slack: Pipeline Error Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "portfolio-demo"
+  },
+  "pinData": {},
+  "tags": []
+}
