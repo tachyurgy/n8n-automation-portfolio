@@ -19,7 +19,7 @@ after handoff.
 | **04** | [Production Hardening Kit](./04-production-hardening-kit) | Error Router (deduped Slack alerts) + Assert Outcome sub-workflow + hourly Execution Auditor + a worked hardened example | Catches the **green run that did nothing**: dedup by fingerprint, outcome receipts, error-streak and fast-green detection. Verified import on n8n 2.39.8 |
 
 Lint any of them (or your own) with [n8n-workflow-lint](https://github.com/tachyurgy/n8n-workflow-lint):
-`npx n8n-workflow-lint workflow.json`.
+`npx github:tachyurgy/n8n-workflow-lint workflow.json`.
 
 ## What makes these senior-grade
 
@@ -44,7 +44,7 @@ Most automation help stops at the node palette. These go further:
 I build n8n & Make automations, AI-agent workflows, custom nodes, and Zapier/Make → n8n
 migrations. Remote, async-friendly.
 
-**→ Portfolio & case studies:** https://automation.levelbrook.com
+**→ Portfolio & case studies:** https://ai.levelbrook.com/work/silent-failures/
 **→ Get in touch:** levelbrookteam@gmail.com
 
 *Levelbrook Consulting — automation engineering.*
