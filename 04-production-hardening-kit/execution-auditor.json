@@ -1,0 +1,295 @@
+{
+  "id": "gElZPfdfTKVbWMn9",
+  "name": "Execution Auditor (green runs that did nothing)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Execution Auditor\nRuns every hour, pulls recent executions through the **n8n API node**, and flags:\n\n- **error-streak** — N consecutive failures (you would only know by opening the execution list)\n- **all-failed** — nothing in the window succeeded\n- **fast-green** — the '700 green runs that never did the job' pattern: successes finish in milliseconds while the runs that took real time all failed\n\nSetup:\n1. Settings → n8n API → create a key → add it as an **n8n API** credential on the 'Recent executions' node.\n2. Set `baseUrl` in **Config** so alerts link to the execution list.\n3. Pick your Slack credential + channel.\n\nTune thresholds in Config. The audit is read-only.",
+        "height": 440,
+        "width": 480,
+        "color": 4
+      },
+      "id": "f3bc5c9c-2c68-4110-8f3c-fff2129aa051",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -640,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "a416dc6d-f040-4809-b242-d16678e78bfc",
+      "name": "Every hour",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -160,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "405b8b1e-5f4d-48fe-a522-577865ea1611",
+              "name": "baseUrl",
+              "value": "https://n8n.example.com",
+              "type": "string"
+            },
+            {
+              "id": "58cc472c-1675-45e6-849d-5591a6b3eb45",
+              "name": "fastGreenMs",
+              "value": 200,
+              "type": "number"
+            },
+            {
+              "id": "9aa9f7a3-a679-4031-9f63-81f52adae13e",
+              "name": "errorStreak",
+              "value": 3,
+              "type": "number"
+            },
+            {
+              "id": "6d76a4d4-56b3-46ee-b46e-0016b30a22c8",
+              "name": "minRunsForFastGreen",
+              "value": 10,
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "63ce6dd1-dfdd-4dce-94eb-736ba813e318",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        60,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "execution",
+        "operation": "getAll",
+        "returnAll": false,
+        "limit": 250,
+        "filters": {},
+        "options": {},
+        "requestOptions": {}
+      },
+      "id": "2be7dc58-d912-46e2-8b08-0f94507d85b7",
+      "name": "Recent executions",
+      "type": "n8n-nodes-base.n8n",
+      "typeVersion": 1,
+      "position": [
+        280,
+        40
+      ],
+      "credentials": {
+        "n8nApi": {
+          "id": "REPLACE_ME",
+          "name": "n8n account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Look at the last N executions across the instance and flag the shapes that mean\n// \"something is quietly wrong\", none of which an Error Workflow can see.\nconst cfg = $('Config').first().json;\nconst FAST_MS = Number(cfg.fastGreenMs) || 200;      // a \"successful\" run faster than this did no real work\nconst STREAK = Number(cfg.errorStreak) || 3;\nconst MIN_RUNS = Number(cfg.minRunsForFastGreen) || 10;\nconst base = String(cfg.baseUrl || '').replace(/\\/$/, '');\n\nconst byWf = {};\nfor (const { json: e } of $input.all()) {\n  const id = e.workflowId || 'unknown';\n  const w = byWf[id] = byWf[id] || { id, name: e.workflowName || e.workflowData?.name || id, runs: [] };\n  const started = e.startedAt ? new Date(e.startedAt).getTime() : null;\n  const stopped = e.stoppedAt ? new Date(e.stoppedAt).getTime() : null;\n  w.runs.push({\n    id: e.id, status: e.status || (e.finished ? 'success' : 'error'),\n    started, ms: started && stopped ? stopped - started : null, mode: e.mode,\n  });\n}\n\nconst findings = [];\nfor (const w of Object.values(byWf)) {\n  w.runs.sort((a, b) => (b.started || 0) - (a.started || 0));   // newest first\n  const success = w.runs.filter(r => r.status === 'success');\n  const errors = w.runs.filter(r => r.status === 'error' || r.status === 'crashed');\n  const link = base ? `${base}/workflow/${w.id}/executions` : `workflow ${w.id}`;\n\n  // 1. consecutive failures, newest first\n  let streak = 0;\n  for (const r of w.runs) { if (r.status === 'error' || r.status === 'crashed') streak++; else break; }\n  if (streak >= STREAK) findings.push({ kind: 'error-streak', workflow: w.name, workflowId: w.id, link,\n    detail: `${streak} consecutive failed executions (latest ${new Date(w.runs[0].started).toISOString()})` });\n\n  // 2. everything in the window failed\n  if (errors.length >= STREAK && success.length === 0 && streak < STREAK) findings.push({ kind: 'all-failed', workflow: w.name, workflowId: w.id, link,\n    detail: `${errors.length} executions in the window, none succeeded` });\n\n  // 3. fast-green: successes finish in milliseconds while the runs that did real work failed\n  const fast = success.filter(r => r.ms !== null && r.ms < FAST_MS).length;\n  const slowErrors = errors.filter(r => r.ms !== null && r.ms > 1000).length;\n  if (success.length >= MIN_RUNS && fast / success.length >= 0.9 && slowErrors > 0) {\n    const med = success.map(r => r.ms).filter(x => x !== null).sort((a, b) => a - b);\n    findings.push({ kind: 'fast-green', workflow: w.name, workflowId: w.id, link,\n      detail: `${success.length} \"successful\" runs, ${Math.round(100 * fast / success.length)}% under ${FAST_MS} ms (median ${med[Math.floor(med.length / 2)]} ms); the ${slowErrors} run(s) that took real time all failed. The green runs are probably skipping the work.` });\n  }\n}\n\nconst summary = { workflowsSeen: Object.keys(byWf).length, executionsSeen: $input.all().length, findings: findings.length, checkedAt: new Date().toISOString() };\nreturn findings.length ? findings.map(f => ({ json: { ...f, ...summary } })) : [{ json: { kind: 'all-quiet', ...summary } }];"
+      },
+      "id": "b8a3517c-d4d7-4c63-9c59-441ce56325e5",
+      "name": "Analyze",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "445860d2-632b-41a8-8062-1404106d86ca",
+              "leftValue": "={{ $json.kind }}",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              },
+              "rightValue": "all-quiet"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "be236ae3-b94a-4a3f-9955-f12562283175",
+      "name": "Any findings?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        720,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all().map(i => i.json);\nconst s = items[0];\nconst icon = { 'error-streak': ':red_circle:', 'all-failed': ':black_circle:', 'fast-green': ':large_yellow_circle:' };\nconst lines = items.map(f => `${icon[f.kind] || ':white_circle:'} *${f.workflow}* — ${f.kind}\\n> ${f.detail}\\n> <${f.link}|executions>`);\nreturn [{ json: { text: `*n8n execution audit* — ${s.findings} finding(s) across ${s.workflowsSeen} workflows / ${s.executionsSeen} executions\\n\\n${lines.join('\\n\\n')}\\n\\n_Only an execution that did the work is a success. Fix the workflow, not the alert._` } }];"
+      },
+      "id": "68a6ac1f-ad7a-4310-a407-2fd3bd9d58d7",
+      "name": "Format digest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        -60
+      ]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "#automation-alerts"
+        },
+        "text": "={{ $json.text }}",
+        "otherOptions": {
+          "mrkdwn": true
+        }
+      },
+      "id": "e5dd1d50-c892-4bf0-98cd-925080d0aa1f",
+      "name": "Slack: audit digest",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        1180,
+        -60
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE_ME",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "5441128c-4b31-4bb0-a478-be3a0bf28f55",
+      "name": "All quiet",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        960,
+        140
+      ]
+    }
+  ],
+  "connections": {
+    "Every hour": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Recent executions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recent executions": {
+      "main": [
+        [
+          {
+            "node": "Analyze",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze": {
+      "main": [
+        [
+          {
+            "node": "Any findings?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any findings?": {
+      "main": [
+        [
+          {
+            "node": "Format digest",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "All quiet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format digest": {
+      "main": [
+        [
+          {
+            "node": "Slack: audit digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "executionTimeout": 300,
+    "errorWorkflow": "REPLACE_WITH_ERROR_ROUTER_ID"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

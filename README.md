@@ -16,6 +16,10 @@ after handoff.
 | **01** | [RAG Knowledge Agent](./01-rag-knowledge-agent) | Chat with your company's docs in Slack/Telegram; cited answers; auto re-index on doc change | Vector retrieval, citation-grounded agent, Whisper voice, **idempotent delete-then-insert re-indexing** |
 | **02** | [Lead Enrichment & ICP Scoring](./02-lead-enrichment-scoring) | Inbound lead → enriched → LLM-scored → deduped → CRM → hot-lead alert | **Caching enrichment microservice**, structured-JSON LLM scoring, idempotent dedup, error observability |
 | **03** | [Content Repurposing Engine](./03-content-repurposing) | One podcast/blog → LinkedIn + X thread + newsletter + video captions | Parallel channel generation, brand-voice prompting, **human-in-the-loop approval** |
+| **04** | [Production Hardening Kit](./04-production-hardening-kit) | Error Router (deduped Slack alerts) + Assert Outcome sub-workflow + hourly Execution Auditor + a worked hardened example | Catches the **green run that did nothing**: dedup by fingerprint, outcome receipts, error-streak and fast-green detection. Verified import on n8n 2.39.8 |
+
+Lint any of them (or your own) with [n8n-workflow-lint](https://github.com/tachyurgy/n8n-workflow-lint):
+`npx n8n-workflow-lint workflow.json`.
 
 ## What makes these senior-grade
 

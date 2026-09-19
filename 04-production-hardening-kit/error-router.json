@@ -1,0 +1,193 @@
+{
+  "id": "4qfeg4rPJHUv5VOz",
+  "name": "Error Router (dedup + Slack)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Error Router\nAttach this to every production workflow: **Workflow settings → Error Workflow**.\n\nWhat it does:\n1. **Normalize** the Error Trigger payload into one flat record.\n2. **Dedup** by workflow + node + message for 30 minutes using workflow static data, so a workflow failing every minute produces one alert, then a count, not 60 pings.\n3. **Alert** Slack with a link straight to the failed execution.\n\nSetup: pick your Slack credential + channel in the Slack node. Change `WINDOW_MIN` in the Dedup node if 30 min is wrong for you.\n\nStatic data only persists for *production* executions (triggered, not 'Test workflow'), so test with a real failing workflow.",
+        "height": 420,
+        "width": 460,
+        "color": 4
+      },
+      "id": "356dee5b-be6e-4ec1-b102-7249d0ba1ccc",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -620,
+        -140
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "06178903-1a17-469e-982e-6b0b45baf448",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Error Trigger gives us { execution: {...}, workflow: {...} } (or a trigger-level shape).\n// Flatten it into one predictable record so every alert looks the same.\nconst e = $json.execution || {};\nconst w = $json.workflow || {};\nconst err = e.error || $json.error || {};\nconst nodeName = (err.node && err.node.name) || e.lastNodeExecuted || $json.node?.name || 'unknown node';\nconst message = String(err.message || err.description || 'no message').replace(/\\s+/g, ' ').trim();\nconst fingerprint = [w.id || w.name || 'wf', nodeName, message.slice(0, 80)].join('|');\nreturn [{ json: {\n  workflow: w.name || 'unknown workflow',\n  workflowId: w.id || null,\n  executionId: e.id || null,\n  executionUrl: e.url || null,\n  mode: e.mode || $json.mode || null,\n  node: nodeName,\n  message,\n  stack: (err.stack || '').split('\\n').slice(0, 6).join('\\n'),\n  retryOf: e.retryOf || null,\n  ts: new Date().toISOString(),\n  fingerprint,\n}}];"
+      },
+      "id": "b7bc927a-0ea9-491f-b3de-75bf1127ac48",
+      "name": "Normalize error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        60,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// One Slack message per distinct failure per window, not one per execution.\n// A workflow firing every minute against a dead API sends 1 alert, then a count.\nconst WINDOW_MIN = 30;\nconst store = $getWorkflowStaticData('global');   // persists across production executions\nstore.seen = store.seen || {};\nconst now = Date.now();\nconst out = [];\nfor (const item of $input.all()) {\n  const f = item.json.fingerprint;\n  const rec = store.seen[f];\n  const fresh = !rec || (now - rec.last) > WINDOW_MIN * 60 * 1000;\n  if (fresh) {\n    store.seen[f] = { first: now, last: now, count: 1 };\n  } else {\n    rec.last = now; rec.count += 1;\n  }\n  out.push({ json: { ...item.json, isNew: fresh, occurrences: store.seen[f].count, windowMin: WINDOW_MIN } });\n}\n// housekeeping: forget fingerprints older than a day so static data stays small\nfor (const [k, v] of Object.entries(store.seen)) if (now - v.last > 24 * 3600 * 1000) delete store.seen[k];\nreturn out;"
+      },
+      "id": "58d8f871-6ffc-4d5e-916e-362244114598",
+      "name": "Dedup (30 min window)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        280,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "db5802d6-5f73-4f51-8c07-e4cba482fcc3",
+              "leftValue": "={{ $json.isNew }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d0e0b866-a077-4243-9917-ceebb1cb3da1",
+      "name": "New in this window?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        500,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "#automation-alerts"
+        },
+        "text": "=:rotating_light: *{{ $json.workflow }}* failed at *{{ $json.node }}*\n> {{ $json.message }}\n<{{ $json.executionUrl }}|Open execution {{ $json.executionId }}> · mode: {{ $json.mode }}{{ $json.retryOf ? ' · retry of ' + $json.retryOf : '' }}\n_You will not be pinged again for this failure for {{ $json.windowMin }} min; the count will be in the next alert._",
+        "otherOptions": {
+          "mrkdwn": true
+        }
+      },
+      "id": "0943af70-acad-4d2f-aeed-65b7c6e35d90",
+      "name": "Slack: failure alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        740,
+        -60
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE_ME",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "e7c55326-9aea-4305-a37b-eb55aefc7c3e",
+      "name": "Suppressed (already alerted)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        740,
+        140
+      ]
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Normalize error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize error": {
+      "main": [
+        [
+          {
+            "node": "Dedup (30 min window)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dedup (30 min window)": {
+      "main": [
+        [
+          {
+            "node": "New in this window?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New in this window?": {
+      "main": [
+        [
+          {
+            "node": "Slack: failure alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Suppressed (already alerted)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "executionTimeout": 120
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

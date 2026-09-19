@@ -1,0 +1,181 @@
+{
+  "id": "ad6Ql8UdT0yq96Cv",
+  "name": "Assert Outcome (sub-workflow)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Assert Outcome (sub-workflow)\nThe fix for *'every node was green and zero rows landed'*: an execution is only a success if the **work** happened.\n\nCall it from any workflow right after the write step with **Execute Workflow**:\n\n- `label`: \"rows appended to Leads sheet\"\n- `actual`: `{{ $items().length }}` or a count from the API response\n- `min`: 1 (default) · `max`: optional ceiling (catches runaway loops too)\n- `context`: `{{ $workflow.name }} #{{ $execution.id }}`\n\nIf the number is outside bounds it throws **Stop and Error**, which fails the caller's execution and fires your Error Workflow. Inside bounds it returns a receipt item you can log.",
+        "height": 400,
+        "width": 480,
+        "color": 4
+      },
+      "id": "f9d59798-4b7f-4e11-be0e-d28ac593eaef",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -640,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "inputSource": "workflowInputs",
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "label",
+              "type": "string"
+            },
+            {
+              "name": "actual",
+              "type": "number"
+            },
+            {
+              "name": "min",
+              "type": "number"
+            },
+            {
+              "name": "max",
+              "type": "number"
+            },
+            {
+              "name": "context",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "id": "43d7fdb0-058f-47f0-ad83-48d47b8c76b0",
+      "name": "When called by another workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -160,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Compare what actually happened with what the caller expected, and produce a receipt.\nconst items = $input.all();\nreturn items.map(({ json }) => {\n  const actual = Number(json.actual);\n  const min = json.min === undefined || json.min === null || json.min === '' ? 1 : Number(json.min);\n  const max = json.max === undefined || json.max === null || json.max === '' ? null : Number(json.max);\n  const ok = Number.isFinite(actual) && actual >= min && (max === null || actual <= max);\n  return { json: {\n    label: json.label || 'unlabelled check',\n    context: json.context || '',\n    actual, min, max, ok,\n    checkedAt: new Date().toISOString(),\n    checkedBy: $workflow.name,\n    reason: ok ? 'within bounds' : (!Number.isFinite(actual) ? 'actual is not a number' : (actual < min ? `below minimum ${min}` : `above maximum ${max}`)),\n  }};\n});"
+      },
+      "id": "2d2ecd69-49ea-4fb3-82bb-a618845ec8b0",
+      "name": "Evaluate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        60,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "0e8ffd26-e20c-46a8-a557-cdda179d7384",
+              "leftValue": "={{ $json.ok }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3d8befdd-8673-4d60-b5a6-2c6f4b70719d",
+      "name": "Within bounds?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        280,
+        40
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "1648e4f7-1e08-4ae7-88c6-289b324e555b",
+      "name": "Receipt (returned to caller)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        520,
+        -60
+      ]
+    },
+    {
+      "parameters": {
+        "errorType": "errorMessage",
+        "errorMessage": "=Outcome check failed: {{ $json.label }} — got {{ $json.actual }}, expected {{ $json.min }}{{ $json.max !== null ? '–' + $json.max : '+' }} ({{ $json.reason }}){{ $json.context ? ' · ' + $json.context : '' }}"
+      },
+      "id": "4aa3befa-398f-44c6-a13d-b59e39c0c6fc",
+      "name": "Fail loudly",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        520,
+        140
+      ]
+    }
+  ],
+  "connections": {
+    "When called by another workflow": {
+      "main": [
+        [
+          {
+            "node": "Evaluate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate": {
+      "main": [
+        [
+          {
+            "node": "Within bounds?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Within bounds?": {
+      "main": [
+        [
+          {
+            "node": "Receipt (returned to caller)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fail loudly",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "executionTimeout": 60
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

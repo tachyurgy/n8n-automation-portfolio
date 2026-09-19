@@ -1,0 +1,360 @@
+{
+  "id": "UXee73E3T34gpqnt",
+  "name": "Example: hardened fetch-and-append",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Example: a hardened sync\nThe same fetch-and-append every tutorial shows, with the kit applied:\n\n- HTTP Request: **Retry On Fail** (3× / 3 s), **Timeout** 15 s, **On Error → continue (error output)** wired to *Stop and Error* so a failure is loud instead of an empty item.\n- **Any rows?** guards the write; zero rows is an error, not a quiet success.\n- After the write, **Assert Outcome** checks the count and returns a receipt.\n- Workflow settings: **Error Workflow → Error Router**, timeout 10 min.\n\nReplace the placeholder URL and the Sheets node with your own; the shape is the point.",
+        "height": 400,
+        "width": 480,
+        "color": 4
+      },
+      "id": "662a80cf-f724-4e37-a436-003e972805ca",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -640,
+        -220
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "218c0808-1b16-4698-a620-7d255212a83b",
+      "name": "Every 15 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -160,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.example.com/v1/records?updated_since={{ $now.minus({ minutes: 15 }).toISO() }}",
+        "authentication": "none",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "c4c83570-38c3-454c-8362-3226a27b4e6e",
+      "name": "Fetch records",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        60,
+        40
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "errorType": "errorMessage",
+        "errorMessage": "=Fetch records failed after retries: {{ $json.error?.message ?? JSON.stringify($json.error) }}"
+      },
+      "id": "f5b9cf12-3cf4-48dd-9fe1-65f3bc57f97d",
+      "name": "Fetch failed",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        300,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8908fb04-fce0-4031-bf74-eb5d282375c7",
+              "leftValue": "={{ $input.all().length }}",
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              },
+              "rightValue": 0
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "9558c2ff-00f2-4dab-b44d-c57a5e280039",
+      "name": "Any rows?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        300,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REPLACE_WITH_SPREADSHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Records"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "b74b0463-feb7-4481-baa2-436f3d1d5075",
+      "name": "Append rows to sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        540,
+        -60
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "Google Sheets account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "errorType": "errorMessage",
+        "errorMessage": "Fetch returned 0 records. Either the source is quiet (raise the window) or the response shape changed."
+      },
+      "id": "786de5d6-1954-4bf6-a60b-2635695c5489",
+      "name": "Nothing to write",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        540,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Turn 'how many items reached this point' into a single check item for Assert Outcome.\nconst n = $input.all().length;\nreturn [{ json: { label: 'rows appended to the sheet', actual: n, min: 1, max: 5000, context: `${$workflow.name} #${$execution.id}` } }];"
+      },
+      "id": "3706db9b-8447-4912-9f91-b21e97d32900",
+      "name": "Count what was written",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        780,
+        -60
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "REPLACE_WITH_ASSERT_OUTCOME_ID",
+          "cachedResultName": "Assert Outcome (sub-workflow)"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "label": "={{ $json.label }}",
+            "actual": "={{ $json.actual }}",
+            "min": "={{ $json.min }}",
+            "max": "={{ $json.max }}",
+            "context": "={{ $json.context }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "label",
+              "displayName": "label",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "actual",
+              "displayName": "actual",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "min",
+              "displayName": "min",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "max",
+              "displayName": "max",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "context",
+              "displayName": "context",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            }
+          ]
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "20a91504-5dd0-4360-978c-76c592a57322",
+      "name": "Assert Outcome",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1000,
+        -60
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "13ad3086-28d9-46df-9318-a969fb6480fb",
+      "name": "Done (receipt)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1220,
+        -60
+      ]
+    }
+  ],
+  "connections": {
+    "Every 15 minutes": {
+      "main": [
+        [
+          {
+            "node": "Fetch records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch records": {
+      "main": [
+        [
+          {
+            "node": "Any rows?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fetch failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any rows?": {
+      "main": [
+        [
+          {
+            "node": "Append rows to sheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Nothing to write",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append rows to sheet": {
+      "main": [
+        [
+          {
+            "node": "Count what was written",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Count what was written": {
+      "main": [
+        [
+          {
+            "node": "Assert Outcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assert Outcome": {
+      "main": [
+        [
+          {
+            "node": "Done (receipt)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "REPLACE_WITH_ERROR_ROUTER_ID",
+    "executionTimeout": 600,
+    "saveDataSuccessExecution": "all"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
